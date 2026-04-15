@@ -1643,15 +1643,28 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
     const interval = setInterval(() => {
       const now = Date.now();
       setCurrentTime(now);
-      setChats(prevChats => prevChats.map(c => {
-        if (c.id !== chat.id) return c;
-        const updatedMessages = c.messages.filter(m => {
-          if (!m.isEphemeral || !m.viewedAt || !m.ttlSeconds) return true;
+      setChats(prevChats => {
+        const chatToUpdate = prevChats.find(c => c.id === chat.id);
+        if (!chatToUpdate) return prevChats;
+
+        const hasExpired = chatToUpdate.messages.some(m => {
+          if (!m.isEphemeral || !m.viewedAt || !m.ttlSeconds) return false;
           const elapsed = (now - m.viewedAt.getTime()) / 1000;
-          return elapsed < m.ttlSeconds;
+          return elapsed >= m.ttlSeconds;
         });
-        return { ...c, messages: updatedMessages };
-      }));
+
+        if (!hasExpired) return prevChats;
+
+        return prevChats.map(c => {
+          if (c.id !== chat.id) return c;
+          const updatedMessages = c.messages.filter(m => {
+            if (!m.isEphemeral || !m.viewedAt || !m.ttlSeconds) return true;
+            const elapsed = (now - m.viewedAt.getTime()) / 1000;
+            return elapsed < m.ttlSeconds;
+          });
+          return { ...c, messages: updatedMessages };
+        });
+      });
     }, 1000);
     return () => clearInterval(interval);
   }, [chat.id, setChats]);
@@ -1659,6 +1672,10 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
   // Mark incoming messages as viewed
   useEffect(() => {
     if (chat.settings?.readReceipts === false) return;
+    
+    const hasUnread = chat.messages.some(m => !m.viewedAt && m.senderId !== currentUser.id);
+    if (!hasUnread) return;
+
     setChats(prevChats => prevChats.map(c => {
       if (c.id !== chat.id) return c;
       let changed = false;
@@ -1675,11 +1692,13 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
 
   // Simulate recipient delivering and reading your messages after a delay
   useEffect(() => {
-    const sentMessages = chat.messages.filter(m => m.senderId === currentUser.id && m.status === 'sent');
-    if (sentMessages.length > 0) {
+    const hasSent = chat.messages.some(m => m.senderId === currentUser.id && m.status === 'sent');
+    if (hasSent) {
       const timer = setTimeout(() => {
         setChats(prevChats => prevChats.map(c => {
           if (c.id !== chat.id) return c;
+          const hasSentInPrev = c.messages.some(m => m.senderId === currentUser.id && m.status === 'sent');
+          if (!hasSentInPrev) return c;
           return {
             ...c,
             messages: c.messages.map(m => 
@@ -1693,11 +1712,13 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
   }, [chat.id, chat.messages, setChats, currentUser.id]);
 
   useEffect(() => {
-    const unreadMessages = chat.messages.filter(m => m.senderId === currentUser.id && m.status === 'delivered' && !m.viewedAt);
-    if (unreadMessages.length > 0) {
+    const hasUnreadDelivered = chat.messages.some(m => m.senderId === currentUser.id && m.status === 'delivered' && !m.viewedAt);
+    if (hasUnreadDelivered) {
       const timer = setTimeout(() => {
         setChats(prevChats => prevChats.map(c => {
           if (c.id !== chat.id) return c;
+          const hasUnreadInPrev = c.messages.some(m => m.senderId === currentUser.id && m.status === 'delivered' && !m.viewedAt);
+          if (!hasUnreadInPrev) return c;
           return {
             ...c,
             messages: c.messages.map(m => 
@@ -5674,6 +5695,7 @@ function MainApp() {
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [keypadLayout, setKeypadLayout] = useState<number[]>([1, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
   const [isWindowFocused, setIsWindowFocused] = useState(true);
+  const isWindowFocusedRef = useRef(true);
   const [showScreenshotWarning, setShowScreenshotWarning] = useState(false);
   const inactivityTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -5699,16 +5721,15 @@ function MainApp() {
   const resetInactivityTimer = useCallback(() => {
     if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
     const autoLockEnabled = typeof window !== 'undefined' && localStorage.getItem('cipher-auto-lock') === 'true';
-    if (autoLockEnabled && user && !isLocked) {
+    if (autoLockEnabled && !isLocked) {
       // 5 minutes = 300000 ms
       inactivityTimerRef.current = setTimeout(() => {
         handleLockApp();
       }, 300000);
     }
-  }, [user, isLocked, handleLockApp]);
+  }, [isLocked, handleLockApp]);
 
   useEffect(() => {
-    // eslint-disable-next-line
     setMounted(true);
 
     // Initialize Theme
@@ -5716,24 +5737,28 @@ function MainApp() {
     if (savedTheme === 'light') {
       document.documentElement.classList.add('theme-light');
     }
+  }, []);
 
+  useEffect(() => {
     // Initialize Screen Security
     const handleVisibilityChange = () => {
       const screenSecurity = localStorage.getItem('cipher-screen-security') === 'true';
       if (screenSecurity && document.hidden) {
         document.body.style.filter = 'blur(20px)';
-      } else if (!document.hidden && isWindowFocused) {
+      } else if (!document.hidden && isWindowFocusedRef.current) {
         document.body.style.filter = 'none';
       }
     };
 
     const handleFocus = () => {
       setIsWindowFocused(true);
+      isWindowFocusedRef.current = true;
       document.body.style.filter = 'none';
     };
 
     const handleBlur = () => {
       setIsWindowFocused(false);
+      isWindowFocusedRef.current = false;
       const screenSecurity = localStorage.getItem('cipher-screen-security') === 'true';
       if (screenSecurity) {
         document.body.style.filter = 'blur(20px)';
@@ -5763,12 +5788,37 @@ function MainApp() {
     const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
     events.forEach(event => document.addEventListener(event, resetInactivityTimer));
 
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('contextmenu', handleContextMenu);
+      window.removeEventListener('keydown', handleKeyDown);
+      events.forEach(event => document.removeEventListener(event, resetInactivityTimer));
+    };
+  }, [resetInactivityTimer]);
+
+  useEffect(() => {
     const checkAuth = async () => {
       // Check custom auth first
       const customSession = localStorage.getItem('cipherchat_session');
       if (customSession) {
         const customUser = JSON.parse(customSession);
         try {
+          // Check if offline
+          if (!navigator.onLine) {
+             setUser({
+              id: customUser.uid,
+              name: customUser.displayName || 'Anonymous',
+              username: '@offline_user',
+              email: customUser.email || '',
+              avatar: customUser.photoURL || `https://picsum.photos/seed/${customUser.uid}/100/100`,
+              isOnline: false
+            });
+            setLoading(false);
+            return;
+          }
+
           const userDoc = await getDoc(doc(db, 'users', customUser.uid));
           if (userDoc.exists()) {
             const data = userDoc.data() as User;
@@ -5795,7 +5845,11 @@ function MainApp() {
           }
           resetInactivityTimer();
         } catch (err) {
-          handleFirestoreError(err, OperationType.GET, `users/${customUser.uid}`);
+          if (err instanceof Error && (err.message.includes('offline') || err.message.includes('unavailable'))) {
+            console.warn("Firestore offline during auth check");
+          } else {
+            handleFirestoreError(err, OperationType.GET, `users/${customUser.uid}`);
+          }
         } finally {
           setLoading(false);
         }
@@ -5806,6 +5860,19 @@ function MainApp() {
       const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
         if (firebaseUser) {
           try {
+            if (!navigator.onLine) {
+               setUser({
+                id: firebaseUser.uid,
+                name: firebaseUser.displayName || 'Anonymous',
+                username: '@offline_user',
+                email: firebaseUser.email || '',
+                avatar: firebaseUser.photoURL || `https://picsum.photos/seed/${firebaseUser.uid}/100/100`,
+                isOnline: false
+              });
+              setLoading(false);
+              return;
+            }
+
             // Fetch user data from Firestore
             const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
             if (userDoc.exists()) {
@@ -5833,7 +5900,11 @@ function MainApp() {
             }
             resetInactivityTimer();
           } catch (err) {
-            handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
+            if (err instanceof Error && (err.message.includes('offline') || err.message.includes('unavailable'))) {
+              console.warn("Firestore offline during auth check");
+            } else {
+              handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
+            }
           } finally {
             setLoading(false);
           }
@@ -5858,16 +5929,9 @@ function MainApp() {
     return () => {
       if (unsubscribeFirebase) unsubscribeFirebase();
       window.removeEventListener('cipherchat_auth_changed', handleCustomAuthChange);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('blur', handleBlur);
-      window.removeEventListener('contextmenu', handleContextMenu);
-      window.removeEventListener('keydown', handleKeyDown);
-      const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
-      events.forEach(event => document.removeEventListener(event, resetInactivityTimer));
       if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
     };
-  }, [user, isLocked, resetInactivityTimer, isWindowFocused]);
+  }, [resetInactivityTimer]);
 
   const handleLogout = async () => {
     localStorage.removeItem('cipherchat_session');
