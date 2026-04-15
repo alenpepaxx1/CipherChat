@@ -759,21 +759,23 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
       });
       
       setChats(prev => {
-        // Keep initial chats that are not in Firestore yet
         const initialChats = getInitialChats(currentUser);
-        const merged = [...initialChats];
+        const result = [...initialChats];
         
         updatedChats.forEach(newChat => {
-          const index = merged.findIndex(c => c.id === newChat.id);
+          const index = result.findIndex(c => c.id === newChat.id);
           if (index !== -1) {
             // Merge Firestore data with existing state (preserving messages)
-            merged[index] = { ...merged[index], ...newChat, messages: merged[index].messages };
+            result[index] = { ...result[index], ...newChat, messages: result[index].messages };
           } else {
-            merged.push(newChat);
+            result.push(newChat);
           }
         });
-        
-        return merged;
+
+        // Ensure no duplicates by ID
+        return result.filter((chat, index, self) => 
+          index === self.findIndex((t) => t.id === chat.id)
+        );
       });
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, 'chats');
@@ -1804,11 +1806,18 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
     // Persist to Firestore (skip for local-only chats)
     if (chat.id !== 'ai-chat' && chat.id !== 'saved') {
       try {
-        const messageData = {
+        const messageData: any = {
           ...newMessage,
           timestamp: serverTimestamp(),
         };
-        delete (messageData as any).id; // Let Firestore generate ID
+        delete messageData.id; // Let Firestore generate ID
+        
+        // Remove undefined fields for Firestore
+        Object.keys(messageData).forEach(key => {
+          if (messageData[key] === undefined) {
+            delete messageData[key];
+          }
+        });
         
         await addDoc(collection(db, 'chats', chat.id, 'messages'), messageData);
         
@@ -1871,6 +1880,36 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
     };
 
     setChats(prev => prev.map(c => c.id === chat.id ? { ...c, messages: [...c.messages, newMessage] } : c));
+
+    // Persist to Firestore (skip for local-only chats)
+    if (chat.id !== 'ai-chat' && chat.id !== 'saved') {
+      try {
+        const messageData: any = {
+          ...newMessage,
+          timestamp: serverTimestamp(),
+        };
+        delete messageData.id;
+        
+        // Remove undefined fields for Firestore
+        Object.keys(messageData).forEach(key => {
+          if (messageData[key] === undefined) {
+            delete messageData[key];
+          }
+        });
+        
+        await addDoc(collection(db, 'chats', chat.id, 'messages'), messageData);
+        
+        await updateDoc(doc(db, 'chats', chat.id), {
+          lastMessage: {
+            text: 'Sent a GIF',
+            senderId: currentUser.id,
+            timestamp: serverTimestamp()
+          }
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, `chats/${chat.id}/messages`);
+      }
+    }
 
     setTimeout(() => {
       setChats(prev => prev.map(c => c.id === chat.id ? {
