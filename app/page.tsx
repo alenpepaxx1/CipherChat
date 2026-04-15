@@ -8,7 +8,6 @@ import { Shield, MessageSquare, Clock, Users, Lock, Server, Key, FileText, Send,
 import { motion, AnimatePresence } from 'motion/react';
 import { validateMessage, sanitizeInput } from '../lib/security';
 import { GoogleGenAI } from "@google/genai";
-import * as openpgp from 'openpgp';
 import { auth, db } from '../firebase';
 import { 
   onAuthStateChanged, 
@@ -743,6 +742,7 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
 
   useEffect(() => {
     async function initCrypto() {
+      if (!Crypto.isCryptoAvailable()) return;
       let privKey = await Crypto.getPrivateKey();
       let pubKeyStr = currentUser.publicKey;
 
@@ -1449,18 +1449,20 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
   };
 
   const encryptMessage = async (message: string, publicKey: string) => {
-    const pgpPublicKey = await openpgp.readKey({ armoredKey: publicKey });
-    const encrypted = await openpgp.encrypt({
-      message: await openpgp.createMessage({ text: message }),
+    const pgp = await import('openpgp');
+    const pgpPublicKey = await pgp.readKey({ armoredKey: publicKey });
+    const encrypted = await pgp.encrypt({
+      message: await pgp.createMessage({ text: message }),
       encryptionKeys: pgpPublicKey
     });
     return encrypted as string;
   };
 
   const decryptMessage = async (encryptedMessage: string, privateKey: string) => {
-    const pgpPrivateKey = await openpgp.readPrivateKey({ armoredKey: privateKey });
-    const message = await openpgp.readMessage({ armoredMessage: encryptedMessage });
-    const { data: decrypted } = await openpgp.decrypt({
+    const pgp = await import('openpgp');
+    const pgpPrivateKey = await pgp.readPrivateKey({ armoredKey: privateKey });
+    const message = await pgp.readMessage({ armoredMessage: encryptedMessage });
+    const { data: decrypted } = await pgp.decrypt({
       message,
       decryptionKeys: pgpPrivateKey
     });
@@ -4777,6 +4779,7 @@ function AuthModal({ mode, onClose }: { mode: 'login' | 'signup', onClose: () =>
 
   const downloadCipherChatDB = async (user: { uid: string, email: string | null }, pass: string) => {
     try {
+      const pgp = await import('openpgp');
       const data = {
         uid: user.uid,
         email: user.email,
@@ -4784,8 +4787,8 @@ function AuthModal({ mode, onClose }: { mode: 'login' | 'signup', onClose: () =>
         app: 'CipherChat'
       };
       
-      const message = await openpgp.createMessage({ text: JSON.stringify(data) });
-      const encrypted = await openpgp.encrypt({
+      const message = await pgp.createMessage({ text: JSON.stringify(data) });
+      const encrypted = await pgp.encrypt({
         message,
         passwords: [pass],
         format: 'armored'
