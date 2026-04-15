@@ -4,151 +4,37 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Shield, MessageSquare, Clock, Users, Lock, Server, Key, FileText, Send, Trash2, Pencil, Eye, EyeOff, Check, CheckCheck, SmilePlus, UserCircle, Camera, Phone, Video, Mic, MicOff, VideoOff, PhoneOff, Paperclip, File as FileIcon, Download, Image as ImageIcon, X, Settings, Search, Wifi, WifiOff, SignalHigh, Pin, AlertCircle, RefreshCw, CheckCircle2, ArrowRight, LogOut, Zap, Loader2, Film, Music, Archive, Code, Play, Pause, Copy, ShieldCheck, User, Menu, Globe, Cpu, Layers, Fingerprint, Activity, ChevronDown, Database, Sun, Moon, Keyboard, MonitorOff, Timer, Palette, Sparkles, Plus, Bell, ChevronLeft, ChevronRight, UserX } from 'lucide-react';
+import { Shield, MessageSquare, Clock, Users, Lock, Server, Key, FileText, Send, Trash2, Pencil, Eye, EyeOff, Check, CheckCheck, SmilePlus, UserCircle, Camera, Phone, Video, Mic, MicOff, VideoOff, PhoneOff, Paperclip, File as FileIcon, Download, Image as ImageIcon, X, Settings, Search, Wifi, WifiOff, SignalHigh, Pin, AlertCircle, RefreshCw, CheckCircle2, ArrowRight, LogOut, Zap, Loader2, Film, Music, Archive, Code, Play, Pause, Copy, ShieldCheck, User as UserIcon, Menu, Globe, Cpu, Layers, Fingerprint, Activity, ChevronDown, Database, Sun, Moon, Keyboard, MonitorOff, Timer, Palette, Sparkles, Plus, Bell, ChevronLeft, ChevronRight, UserX } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { validateMessage, sanitizeInput } from '../lib/security';
 import { GoogleGenAI } from "@google/genai";
 import { auth, db } from '../firebase';
 import { 
   onAuthStateChanged, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
   signOut, 
-  updateProfile,
   signInWithPopup,
   GoogleAuthProvider,
-  User as FirebaseUser
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp, collection, getDocs, query, where, writeBatch, updateDoc, deleteDoc, onSnapshot, addDoc, orderBy } from 'firebase/firestore';
 import { useIsMobile } from '@/hooks/use-mobile';
 import * as Crypto from '../lib/crypto';
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email || undefined,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId || undefined,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
-
-// --- Types ---
-type User = { 
-  id: string; 
-  name: string; 
-  username: string; 
-  email: string; 
-  avatar: string; 
-  isOnline: boolean; 
-  publicKey?: string; // Base64 exported public key
-};
-type Reaction = { emoji: string; userIds: string[] };
-type Attachment = {
-  name: string;
-  size: number;
-  type: string;
-  dataUrl: string;
-};
-type Message = {
-  id: string;
-  senderId: string;
-  text: string;
-  timestamp: Date;
-  isEphemeral: boolean;
-  ttlSeconds?: number;
-  viewedAt?: Date;
-  isEncryptedState?: boolean; // For visual effect
-  encryptedData?: {
-    ciphertext: string;
-    iv: string;
-  } | string;
-  reactions?: Reaction[];
-  attachment?: Attachment;
-  status?: 'pending' | 'sent' | 'delivered' | 'failed';
-  isPinned?: boolean;
-  isEdited?: boolean;
-  originalText?: string;
-};
-
-type Story = {
-  id: string;
-  userId: string;
-  type: 'image' | 'video';
-  url: string;
-  timestamp: Date;
-  viewers: string[];
-};
-
-type CallState = {
-  id?: string;
-  chatId: string;
-  type: 'audio' | 'video';
-  status: 'calling' | 'connecting' | 'connected' | 'reconnecting' | 'connection_lost';
-  participants: User[];
-  callerId?: string;
-};
-type ChatSettings = {
-  readReceipts: boolean;
-  defaultTtl: number;
-  notifications: boolean;
-  encryptionProtocol: 'standard' | 'quantum-resistant';
-  autoDownload: 'all' | 'wifi-only' | 'never';
-  typingIndicators: boolean;
-  linkPreviews: boolean;
-  themeColor?: string;
-};
-
-type Chat = {
-  id: string;
-  name: string;
-  isGroup: boolean;
-  participants: User[];
-  messages: Message[];
-  typingUserIds?: string[];
-  settings?: ChatSettings;
-};
+import { 
+  OperationType, 
+  User, 
+  Message, 
+  Chat, 
+  CallState, 
+  Attachment, 
+  ChatSettings,
+  Story
+} from '../types';
+import { handleFirestoreError } from '../lib/firebase-utils';
+import Image from 'next/image';
+import AudioPlayer from '../components/AudioPlayer';
+import DecryptedText from '../components/DecryptedText';
+import SimpleEmojiPicker from '../components/SimpleEmojiPicker';
+import GifPicker from '../components/GifPicker';
+import { getFileIconComponent, formatFileSize } from '../lib/utils';
 
 // --- Mock Data ---
 const CURRENT_USER: User = { id: 'u1', name: 'You', username: '@you', email: 'you@cipherchat.app', avatar: 'https://picsum.photos/seed/you/100/100', isOnline: true };
@@ -216,154 +102,6 @@ const INITIAL_STORIES: Story[] = [
 ];
 
 // --- Helper Functions ---
-const formatFileSize = (bytes: number) => {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-};
-
-const getFileIconComponent = (type: string, className: string) => {
-  if (type.startsWith('video/')) return <Film className={className} />;
-  if (type.startsWith('audio/')) return <Music className={className} />;
-  if (type.includes('pdf') || type.includes('text/')) return <FileText className={className} />;
-  if (type.includes('zip') || type.includes('tar') || type.includes('compressed') || type.includes('rar')) return <Archive className={className} />;
-  if (type.includes('json') || type.includes('javascript') || type.includes('html') || type.includes('xml')) return <Code className={className} />;
-  return <FileIcon className={className} />;
-};
-
-function AudioPlayer({ src, isMe }: { src: string, isMe: boolean }) {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [playbackRate, setPlaybackRate] = useState(1);
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const progressBarRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const updateProgress = () => {
-      if (audio.duration) {
-        setProgress((audio.currentTime / audio.duration) * 100);
-        setCurrentTime(audio.currentTime);
-      }
-    };
-    const handleEnded = () => { setIsPlaying(false); setProgress(0); setCurrentTime(0); };
-    const handleLoadedMetadata = () => {
-      if (audio.duration !== Infinity && !isNaN(audio.duration)) {
-        setDuration(audio.duration);
-      }
-    };
-
-    audio.addEventListener('timeupdate', updateProgress);
-    audio.addEventListener('ended', handleEnded);
-    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
-
-    return () => {
-      audio.removeEventListener('timeupdate', updateProgress);
-      audio.removeEventListener('ended', handleEnded);
-      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
-    };
-  }, []);
-
-  const togglePlay = () => {
-    if (audioRef.current) {
-      if (isPlaying) audioRef.current.pause();
-      else audioRef.current.play();
-      setIsPlaying(!isPlaying);
-    }
-  };
-
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (progressBarRef.current && audioRef.current && duration) {
-      const rect = progressBarRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const clickedProgress = (x / rect.width);
-      const newTime = clickedProgress * duration;
-      audioRef.current.currentTime = newTime;
-      setProgress(clickedProgress * 100);
-      setCurrentTime(newTime);
-    }
-  };
-
-  const togglePlaybackRate = () => {
-    const rates = [1, 1.5, 2];
-    const nextRate = rates[(rates.indexOf(playbackRate) + 1) % rates.length];
-    setPlaybackRate(nextRate);
-    if (audioRef.current) {
-      audioRef.current.playbackRate = nextRate;
-    }
-  };
-
-  const formatTime = (time: number) => {
-    if (isNaN(time) || !isFinite(time)) return "0:00";
-    const m = Math.floor(time / 60);
-    const s = Math.floor(time % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
-
-  return (
-    <div className={`flex items-center gap-3 p-3 rounded-2xl min-w-[260px] border transition-all duration-300 ${
-      isMe 
-        ? 'bg-white/10 border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.2)]' 
-        : 'bg-neutral-800/90 border-neutral-700/50 shadow-xl'
-    }`}>
-      <button 
-        onClick={togglePlay} 
-        className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 active:scale-90 shadow-lg ${
-          isMe 
-            ? 'bg-white text-blue-600 hover:bg-blue-50' 
-            : 'bg-blue-500 text-white hover:bg-blue-600'
-        }`}
-      >
-        {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
-      </button>
-
-      <div className="flex-1 flex flex-col gap-2">
-        <div 
-          ref={progressBarRef}
-          onClick={handleSeek}
-          className="h-1.5 bg-black/20 rounded-full cursor-pointer relative group"
-        >
-          <div 
-            className={`absolute top-0 left-0 h-full rounded-full transition-all duration-100 ${
-              isMe ? 'bg-white' : 'bg-blue-500'
-            }`} 
-            style={{ width: `${progress}%` }} 
-          />
-          <div 
-            className={`absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity ${
-              isMe ? 'bg-white' : 'bg-blue-400'
-            }`}
-            style={{ left: `calc(${progress}% - 6px)` }}
-          />
-        </div>
-        <div className="flex justify-between items-center text-[10px] font-bold tracking-wider opacity-60 uppercase">
-          <span>{formatTime(currentTime)}</span>
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={togglePlaybackRate}
-              aria-label={`Change playback speed. Current speed is ${playbackRate}x`}
-              className={`px-2 py-0.5 rounded-md text-[9px] font-black transition-all duration-200 active:scale-95 flex items-center justify-center min-w-[32px] ${
-                playbackRate > 1 
-                  ? (isMe ? 'bg-white text-blue-600 shadow-sm' : 'bg-blue-500 text-white shadow-sm') 
-                  : 'bg-black/20 hover:bg-black/30'
-              }`}
-            >
-              {playbackRate}x
-            </button>
-            <span>{formatTime(duration)}</span>
-          </div>
-        </div>
-      </div>
-      <audio ref={audioRef} src={src} preload="metadata" />
-    </div>
-  );
-}
 
 // --- Components ---
 
@@ -402,7 +140,15 @@ function StoryBar({ stories, currentUser, onStoryClick, onAddStory }: { stories:
                 className={`w-14 h-14 rounded-2xl p-0.5 transition-all active:scale-95 ${hasUnseen ? 'bg-gradient-to-tr from-blue-500 to-indigo-600' : 'bg-neutral-800'}`}
               >
                 <div className="w-full h-full rounded-[0.85rem] overflow-hidden border-2 border-neutral-950">
-                  <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
+                  <div className="relative w-full h-full">
+                    <Image 
+                      src={user.avatar} 
+                      alt={user.name} 
+                      fill 
+                      className="object-cover" 
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
                 </div>
               </button>
               <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest truncate w-14 text-center">{user.name.split(' ')[0]}</span>
@@ -487,7 +233,15 @@ function StoryViewer({ userId, stories, onClose, currentUser, setStories }: { us
         <div className="absolute top-8 inset-x-6 flex items-center justify-between z-20 pointer-events-none">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl overflow-hidden border border-white/20">
-              <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
+              <div className="relative w-full h-full">
+                <Image 
+                  src={user.avatar} 
+                  alt={user.name} 
+                  fill 
+                  className="object-cover" 
+                  referrerPolicy="no-referrer"
+                />
+              </div>
             </div>
             <div>
               <div className="text-sm font-bold text-white">{user.name}</div>
@@ -513,7 +267,15 @@ function StoryViewer({ userId, stories, onClose, currentUser, setStories }: { us
           onTouchEnd={() => setIsPaused(false)}
         >
           {story.type === 'image' ? (
-            <img src={story.url} alt="Story" className="w-full h-full object-contain select-none" />
+            <div className="relative w-full h-full">
+              <Image 
+                src={story.url} 
+                alt="Story" 
+                fill 
+                className="object-contain select-none" 
+                referrerPolicy="no-referrer"
+              />
+            </div>
           ) : (
             <video src={story.url} autoPlay muted playsInline className="w-full h-full object-contain" />
           )}
@@ -629,7 +391,15 @@ function StoryUploadModal({ onClose, onUpload, currentUser }: { onClose: () => v
               {file?.type.startsWith('video') ? (
                 <video src={preview} autoPlay muted loop className="w-full h-full object-cover" />
               ) : (
-                <img src={preview} alt="Preview" className="w-full h-full object-cover" />
+                <div className="relative w-full h-full">
+                  <Image 
+                    src={preview} 
+                    alt="Preview" 
+                    fill 
+                    className="object-cover" 
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
               )}
               <button 
                 onClick={() => { setFile(null); setPreview(null); }}
@@ -782,7 +552,7 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
     });
 
     return () => unsubscribe();
-  }, [currentUser?.id]);
+  }, [currentUser]);
 
   // Real-time Message Listener for Active Chat
   useEffect(() => {
@@ -806,7 +576,12 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
         } as Message;
       });
       
-      setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, messages } : c));
+      // Ensure messages are unique by ID to avoid duplicate key errors
+      const uniqueMessages = messages.filter((msg, index, self) =>
+        index === self.findIndex((m) => m.id === msg.id)
+      );
+      
+      setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: uniqueMessages } : c));
     }, (err) => {
       // If messages subcollection doesn't exist yet, it's fine
       if (err.message.includes('permission-denied')) {
@@ -1244,128 +1019,6 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
             />
           )}
         </AnimatePresence>
-      </div>
-    </div>
-  );
-}
-
-function DecryptedText({ 
-  msg, 
-  chat, 
-  currentUser, 
-  userPrivateKey 
-}: { 
-  msg: Message, 
-  chat: Chat, 
-  currentUser: User, 
-  userPrivateKey: CryptoKey | null 
-}) {
-  const [decryptedText, setDecryptedText] = useState<string | null>(null);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    async function decrypt() {
-      if (!msg.encryptedData || !userPrivateKey) return;
-      
-      try {
-        const sender = chat.participants.find(p => p.id === msg.senderId);
-        if (!sender?.publicKey) throw new Error("No public key");
-
-        const senderPubKey = await Crypto.importPublicKey(sender.publicKey);
-        const secretKey = await Crypto.deriveSecretKey(userPrivateKey, senderPubKey);
-        const encryptedData = msg.encryptedData as { ciphertext: ArrayBuffer; iv: Uint8Array };
-        const text = await Crypto.decryptMessage(encryptedData.ciphertext, encryptedData.iv, secretKey);
-        setDecryptedText(text);
-      } catch (err) {
-        console.error("Decryption failed:", err);
-        setError(true);
-      }
-    }
-    decrypt();
-  }, [msg.encryptedData, userPrivateKey, chat.participants, msg.senderId]);
-
-  if (error) return <span className="text-rose-400 italic">Failed to decrypt message</span>;
-  if (!decryptedText) return <span className="opacity-50 italic">Decrypting...</span>;
-  return <span>{decryptedText}</span>;
-}
-
-const EMOJIS = ['😀', '😂', '🥰', '😎', '😭', '🥺', '😡', '👍', '👎', '❤️', '🔥', '✨', '🎉', '🤔', '👀', '🙌', '👏', '🙏', '💪', '💯'];
-
-function SimpleEmojiPicker({ onSelect }: { onSelect: (emoji: string) => void }) {
-  return (
-    <div className="w-64 bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl p-3">
-      <div className="grid grid-cols-5 gap-2">
-        {EMOJIS.map(emoji => (
-          <button 
-            key={emoji} 
-            type="button"
-            onClick={() => onSelect(emoji)}
-            className="text-2xl hover:bg-neutral-800 rounded-lg p-2 transition-colors flex items-center justify-center"
-          >
-            {emoji}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function GifPicker({ onSelect }: { onSelect: (gifUrl: string) => void }) {
-  const [gifs, setGifs] = useState<any[]>([]);
-  const [query, setQuery] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    const fetchGifs = async () => {
-      setLoading(true);
-      try {
-        const endpoint = query.trim() 
-          ? `https://api.giphy.com/v1/gifs/search?api_key=dc6zaTOxFJmzC&q=${encodeURIComponent(query)}&limit=20`
-          : `https://api.giphy.com/v1/gifs/trending?api_key=dc6zaTOxFJmzC&limit=20`;
-        const res = await fetch(endpoint);
-        const data = await res.json();
-        setGifs(data.data || []);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const timeoutId = setTimeout(fetchGifs, 500);
-    return () => clearTimeout(timeoutId);
-  }, [query]);
-
-  return (
-    <div className="w-72 sm:w-80 bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-80">
-      <div className="p-3 border-b border-neutral-800">
-        <input 
-          type="text" 
-          placeholder="Search GIFs..." 
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-blue-500 transition-colors"
-        />
-      </div>
-      <div className="flex-1 overflow-y-auto p-2">
-        {loading ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-2">
-            {gifs.map((gif) => (
-              <button 
-                key={gif.id} 
-                type="button"
-                onClick={() => onSelect(gif.images.fixed_height.url)}
-                className="relative aspect-video rounded-lg overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all"
-              >
-                <img src={gif.images.fixed_height_small.url} alt={gif.title} className="w-full h-full object-cover" />
-              </button>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -1812,14 +1465,12 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
         };
         delete messageData.id; // Let Firestore generate ID
         
-        // Remove undefined fields for Firestore
-        Object.keys(messageData).forEach(key => {
-          if (messageData[key] === undefined) {
-            delete messageData[key];
-          }
-        });
+        // Robustly remove undefined fields for Firestore
+        const cleanMessageData = Object.fromEntries(
+          Object.entries(messageData).filter(([_, v]) => v !== undefined)
+        );
         
-        await addDoc(collection(db, 'chats', chat.id, 'messages'), messageData);
+        await addDoc(collection(db, 'chats', chat.id, 'messages'), cleanMessageData);
         
         // Update last message in chat doc for previews
         await updateDoc(doc(db, 'chats', chat.id), {
@@ -1890,14 +1541,12 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
         };
         delete messageData.id;
         
-        // Remove undefined fields for Firestore
-        Object.keys(messageData).forEach(key => {
-          if (messageData[key] === undefined) {
-            delete messageData[key];
-          }
-        });
+        // Robustly remove undefined fields for Firestore
+        const cleanMessageData = Object.fromEntries(
+          Object.entries(messageData).filter(([_, v]) => v !== undefined)
+        );
         
-        await addDoc(collection(db, 'chats', chat.id, 'messages'), messageData);
+        await addDoc(collection(db, 'chats', chat.id, 'messages'), cleanMessageData);
         
         await updateDoc(doc(db, 'chats', chat.id), {
           lastMessage: {
@@ -2101,11 +1750,27 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
             ) : chat.isGroup ? (
               <div className="flex flex-wrap items-center justify-center gap-0.5 p-1">
                 {chat.participants.slice(0, 4).map((p, i) => (
-                  <img key={p.id} src={p.avatar} alt={p.name} className="w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full object-cover border border-neutral-800" />
+                  <div key={p.id} className="relative w-3.5 h-3.5 sm:w-4 sm:h-4">
+                    <Image 
+                      src={p.avatar} 
+                      alt={p.name} 
+                      fill 
+                      className="rounded-full object-cover border border-neutral-800" 
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
                 ))}
               </div>
             ) : (
-              <img src={chat.participants.find(p => p.id !== currentUser.id)?.avatar} alt="Avatar" className="w-full h-full object-cover" />
+              <div className="relative w-full h-full">
+                <Image 
+                  src={chat.participants.find(p => p.id !== currentUser.id)?.avatar || ''} 
+                  alt="Avatar" 
+                  fill 
+                  className="object-cover" 
+                  referrerPolicy="no-referrer"
+                />
+              </div>
             )}
             {chat.id !== 'saved' && !chat.isGroup && chat.participants.find(p => p.id !== currentUser.id)?.isOnline && (
               <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 sm:w-3.5 sm:h-3.5 bg-emerald-500 rounded-full border-2 border-neutral-950"></div>
@@ -2373,7 +2038,15 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
                         {msg.attachment && (
                           <div className="rounded-xl overflow-hidden border border-white/10 bg-black/20 shadow-inner">
                             {msg.attachment.type.startsWith('image/') ? (
-                              <img src={msg.attachment.dataUrl} alt={msg.attachment.name} className="max-w-full h-auto max-h-48 sm:max-h-72 object-contain" />
+                              <div className="relative max-w-full h-auto max-h-48 sm:max-h-72 aspect-video">
+                                <Image 
+                                  src={msg.attachment.dataUrl} 
+                                  alt={msg.attachment.name} 
+                                  fill
+                                  className="object-contain"
+                                  referrerPolicy="no-referrer"
+                                />
+                              </div>
                             ) : msg.attachment.type.startsWith('audio/') ? (
                               <AudioPlayer src={msg.attachment.dataUrl} isMe={isMe} />
                             ) : (
@@ -2646,7 +2319,15 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
                 <div className="flex items-center gap-4 relative">
                   <div className="w-14 h-14 rounded-2xl bg-neutral-800/80 border border-neutral-700/50 flex items-center justify-center overflow-hidden shadow-inner group-hover:border-blue-500/30 transition-colors">
                     {attachmentPreview.type.startsWith('image/') ? (
-                      <img src={attachmentPreview.dataUrl} alt="Preview" className="w-full h-full object-cover" />
+                      <div className="relative w-full h-full">
+                        <Image 
+                          src={attachmentPreview.dataUrl} 
+                          alt="Preview" 
+                          fill 
+                          className="object-cover" 
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
                     ) : (
                       getFileIconComponent(attachmentPreview.type, "w-7 h-7 text-neutral-400")
                     )}
@@ -3541,7 +3222,15 @@ function ProfileView({ currentUser, setCurrentUser, setChats, onToggleSidebar, i
                 onClick={() => fileInputRef.current?.click()}
                 className="w-24 h-24 sm:w-32 sm:h-32 rounded-[2rem] overflow-hidden border-2 border-neutral-800 group-hover:border-blue-500/50 transition-all duration-500 shadow-2xl relative cursor-pointer"
               >
-                <img src={editAvatar} alt="Avatar" className="w-full h-full object-cover" />
+                <div className="relative w-full h-full">
+                  <Image 
+                    src={editAvatar} 
+                    alt="Avatar" 
+                    fill 
+                    className="object-cover" 
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-[2px]">
                   <Camera className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
                 </div>
@@ -3582,7 +3271,7 @@ function ProfileView({ currentUser, setCurrentUser, setChats, onToggleSidebar, i
               <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-[0.2em] ml-1">Display Name</label>
               <div className="relative group">
                 <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none text-neutral-500 group-focus-within:text-blue-500 transition-colors">
-                  <User className="w-5 h-5" />
+                  <UserIcon className="w-5 h-5" />
                 </div>
                 <input 
                   type="text" 
@@ -3831,7 +3520,15 @@ function NewChatModal({ onClose, currentUser, onCreateChat }: { onClose: () => v
             <div className="flex flex-wrap gap-2">
               {selectedUsers.map(user => (
                 <div key={user.id} className="flex items-center gap-1.5 sm:gap-2 bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full text-[10px] sm:text-xs font-medium">
-                  <img src={user.avatar} alt={user.name} className="w-3 h-3 sm:w-4 sm:h-4 rounded-full" />
+                  <div className="relative w-3 h-3 sm:w-4 sm:h-4">
+                    <Image 
+                      src={user.avatar} 
+                      alt={user.name} 
+                      fill 
+                      className="rounded-full" 
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
                   {user.name}
                   <button onClick={() => toggleUserSelection(user)} className="hover:text-blue-300">
                     <X className="w-3 h-3" />
@@ -3864,7 +3561,15 @@ function NewChatModal({ onClose, currentUser, onCreateChat }: { onClose: () => v
                       className={`w-full flex items-center justify-between p-2.5 sm:p-3 rounded-xl transition-colors ${isSelected ? 'bg-blue-500/10 border border-blue-500/20' : 'hover:bg-neutral-800 border border-transparent'}`}
                     >
                       <div className="flex items-center gap-2.5 sm:gap-3">
-                        <img src={user.avatar} alt={user.name} className="w-8 h-8 sm:w-10 sm:h-10 rounded-full" />
+                        <div className="relative w-8 h-8 sm:w-10 sm:h-10">
+                          <Image 
+                            src={user.avatar} 
+                            alt={user.name} 
+                            fill 
+                            className="rounded-full" 
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
                         <div className="text-left">
                           <p className="text-xs sm:text-sm font-medium text-white">{user.name}</p>
                           <p className="text-[10px] sm:text-xs text-neutral-400">{user.username || '@user'}</p>
@@ -4173,7 +3878,15 @@ function CallOverlay({ activeCall, setActiveCall, currentUser }: { activeCall: C
                 }}
                 className="w-24 h-24 sm:w-32 sm:h-32 lg:w-40 lg:h-40 rounded-full overflow-hidden border-4 border-blue-500/30 shadow-2xl relative"
               >
-                <img src={p.avatar} alt={p.name} className="w-full h-full object-cover" />
+                <div className="relative w-full h-full">
+                  <Image 
+                    src={p.avatar} 
+                    alt={p.name} 
+                    fill 
+                    className="object-cover" 
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
               </motion.div>
             ))}
           </div>
@@ -4242,7 +3955,15 @@ function CallOverlay({ activeCall, setActiveCall, currentUser }: { activeCall: C
 
                 {activeCall.type === 'video' ? (
                   <div className={`absolute inset-0 flex items-center justify-center bg-neutral-800 transition-all duration-500 ${activeCall.status === 'reconnecting' ? 'blur-md grayscale opacity-50' : ''}`}>
-                    <img src={peer.avatar} alt={peer.name} className="w-24 h-24 sm:w-32 sm:h-32 lg:w-48 lg:h-48 rounded-full opacity-50" />
+                    <div className="relative w-24 h-24 sm:w-32 sm:h-32 lg:w-48 lg:h-48 opacity-50">
+                      <Image 
+                        src={peer.avatar} 
+                        alt={peer.name} 
+                        fill 
+                        className="rounded-full" 
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
                     <div className="absolute bottom-4 left-4 sm:bottom-8 sm:left-8 flex flex-col gap-2">
                       <div className="bg-neutral-950/80 px-4 py-2 sm:px-6 sm:py-3 rounded-2xl backdrop-blur-xl border border-white/10 shadow-2xl flex items-center gap-2 sm:gap-3">
                         <span className="text-white text-lg sm:text-xl lg:text-2xl font-black tracking-tight">{peer.name}</span>
@@ -4253,7 +3974,15 @@ function CallOverlay({ activeCall, setActiveCall, currentUser }: { activeCall: C
                 ) : (
                   <div className={`flex flex-col items-center gap-6 sm:gap-8 transition-all duration-500 ${activeCall.status === 'reconnecting' ? 'blur-sm grayscale opacity-50' : ''}`}>
                     <div className="w-24 h-24 sm:w-32 sm:h-32 lg:w-48 lg:h-48 rounded-full overflow-hidden border-4 border-neutral-700 shadow-2xl relative">
-                      <img src={peer.avatar} alt={peer.name} className="w-full h-full object-cover" />
+                      <div className="relative w-full h-full">
+                        <Image 
+                          src={peer.avatar} 
+                          alt={peer.name} 
+                          fill 
+                          className="object-cover" 
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
                       <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
                     </div>
                     <div className="bg-neutral-950/80 px-6 py-3 sm:px-8 sm:py-4 rounded-[2rem] backdrop-blur-xl border border-white/10 shadow-2xl">
@@ -5784,17 +5513,21 @@ function MainApp() {
     };
 
     const handleFocus = () => {
-      setIsWindowFocused(true);
-      isWindowFocusedRef.current = true;
-      document.body.style.filter = 'none';
+      if (!isWindowFocusedRef.current) {
+        setIsWindowFocused(true);
+        isWindowFocusedRef.current = true;
+        document.body.style.filter = 'none';
+      }
     };
 
     const handleBlur = () => {
-      setIsWindowFocused(false);
-      isWindowFocusedRef.current = false;
-      const screenSecurity = localStorage.getItem('cipher-screen-security') === 'true';
-      if (screenSecurity) {
-        document.body.style.filter = 'blur(20px)';
+      if (isWindowFocusedRef.current) {
+        setIsWindowFocused(false);
+        isWindowFocusedRef.current = false;
+        const screenSecurity = localStorage.getItem('cipher-screen-security') === 'true';
+        if (screenSecurity) {
+          document.body.style.filter = 'blur(20px)';
+        }
       }
     };
 
@@ -5831,28 +5564,82 @@ function MainApp() {
     };
   }, [resetInactivityTimer]);
 
-  useEffect(() => {
-    const checkAuth = async () => {
-      // Check custom auth first
-      const customSession = localStorage.getItem('cipherchat_session');
-      if (customSession) {
-        const customUser = JSON.parse(customSession);
+  const checkAuth = useCallback(async () => {
+    // Check custom auth first
+    const customSession = localStorage.getItem('cipherchat_session');
+    if (customSession) {
+      const customUser = JSON.parse(customSession);
+      try {
+        // Check if offline
+        if (!navigator.onLine) {
+           setUser({
+            id: customUser.uid,
+            name: customUser.displayName || 'Anonymous',
+            username: '@offline_user',
+            email: customUser.email || '',
+            avatar: customUser.photoURL || `https://picsum.photos/seed/${customUser.uid}/100/100`,
+            isOnline: false
+          });
+          setLoading(false);
+          return;
+        }
+
+        const userDoc = await getDoc(doc(db, 'users', customUser.uid));
+        if (userDoc.exists()) {
+          const data = userDoc.data() as User;
+          if (!data.username) {
+            const displayName = data.name || 'Anonymous';
+            const baseUsername = displayName.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+            data.username = `@${baseUsername}${randomSuffix}`;
+          }
+          setUser(data);
+        } else {
+          // Fallback
+          const displayName = customUser.displayName || 'Anonymous';
+          const baseUsername = displayName.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+          setUser({
+            id: customUser.uid,
+            name: displayName,
+            username: `@${baseUsername}${randomSuffix}`,
+            email: customUser.email || '',
+            avatar: customUser.photoURL || `https://picsum.photos/seed/${customUser.uid}/100/100`,
+            isOnline: true
+          });
+        }
+        resetInactivityTimer();
+      } catch (err) {
+        if (err instanceof Error && (err.message.includes('offline') || err.message.includes('unavailable'))) {
+          console.warn("Firestore offline during auth check");
+        } else {
+          handleFirestoreError(err, OperationType.GET, `users/${customUser.uid}`);
+        }
+      } finally {
+        setLoading(false);
+      }
+      return null;
+    }
+
+    // Fallback to Firebase Auth (e.g. for Google Login)
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
         try {
-          // Check if offline
           if (!navigator.onLine) {
              setUser({
-              id: customUser.uid,
-              name: customUser.displayName || 'Anonymous',
+              id: firebaseUser.uid,
+              name: firebaseUser.displayName || 'Anonymous',
               username: '@offline_user',
-              email: customUser.email || '',
-              avatar: customUser.photoURL || `https://picsum.photos/seed/${customUser.uid}/100/100`,
+              email: firebaseUser.email || '',
+              avatar: firebaseUser.photoURL || `https://picsum.photos/seed/${firebaseUser.uid}/100/100`,
               isOnline: false
             });
             setLoading(false);
             return;
           }
 
-          const userDoc = await getDoc(doc(db, 'users', customUser.uid));
+          // Fetch user data from Firestore
+          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
           if (userDoc.exists()) {
             const data = userDoc.data() as User;
             if (!data.username) {
@@ -5863,16 +5650,16 @@ function MainApp() {
             }
             setUser(data);
           } else {
-            // Fallback
-            const displayName = customUser.displayName || 'Anonymous';
+            // Fallback if doc doesn't exist yet
+            const displayName = firebaseUser.displayName || 'Anonymous';
             const baseUsername = displayName.toLowerCase().replace(/[^a-z0-9]/g, '');
             const randomSuffix = Math.floor(1000 + Math.random() * 9000);
             setUser({
-              id: customUser.uid,
+              id: firebaseUser.uid,
               name: displayName,
               username: `@${baseUsername}${randomSuffix}`,
-              email: customUser.email || '',
-              avatar: customUser.photoURL || `https://picsum.photos/seed/${customUser.uid}/100/100`,
+              email: firebaseUser.email || '',
+              avatar: firebaseUser.photoURL || `https://picsum.photos/seed/${firebaseUser.uid}/100/100`,
               isOnline: true
             });
           }
@@ -5881,74 +5668,20 @@ function MainApp() {
           if (err instanceof Error && (err.message.includes('offline') || err.message.includes('unavailable'))) {
             console.warn("Firestore offline during auth check");
           } else {
-            handleFirestoreError(err, OperationType.GET, `users/${customUser.uid}`);
+            handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
           }
         } finally {
           setLoading(false);
         }
-        return null;
+      } else {
+        setUser(null);
+        setLoading(false);
       }
+    });
+    return unsubscribe;
+  }, [resetInactivityTimer]);
 
-      // Fallback to Firebase Auth (e.g. for Google Login)
-      const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-        if (firebaseUser) {
-          try {
-            if (!navigator.onLine) {
-               setUser({
-                id: firebaseUser.uid,
-                name: firebaseUser.displayName || 'Anonymous',
-                username: '@offline_user',
-                email: firebaseUser.email || '',
-                avatar: firebaseUser.photoURL || `https://picsum.photos/seed/${firebaseUser.uid}/100/100`,
-                isOnline: false
-              });
-              setLoading(false);
-              return;
-            }
-
-            // Fetch user data from Firestore
-            const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-            if (userDoc.exists()) {
-              const data = userDoc.data() as User;
-              if (!data.username) {
-                const displayName = data.name || 'Anonymous';
-                const baseUsername = displayName.toLowerCase().replace(/[^a-z0-9]/g, '');
-                const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-                data.username = `@${baseUsername}${randomSuffix}`;
-              }
-              setUser(data);
-            } else {
-              // Fallback if doc doesn't exist yet
-              const displayName = firebaseUser.displayName || 'Anonymous';
-              const baseUsername = displayName.toLowerCase().replace(/[^a-z0-9]/g, '');
-              const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-              setUser({
-                id: firebaseUser.uid,
-                name: displayName,
-                username: `@${baseUsername}${randomSuffix}`,
-                email: firebaseUser.email || '',
-                avatar: firebaseUser.photoURL || `https://picsum.photos/seed/${firebaseUser.uid}/100/100`,
-                isOnline: true
-              });
-            }
-            resetInactivityTimer();
-          } catch (err) {
-            if (err instanceof Error && (err.message.includes('offline') || err.message.includes('unavailable'))) {
-              console.warn("Firestore offline during auth check");
-            } else {
-              handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
-            }
-          } finally {
-            setLoading(false);
-          }
-        } else {
-          setUser(null);
-          setLoading(false);
-        }
-      });
-      return unsubscribe;
-    };
-
+  useEffect(() => {
     let unsubscribeFirebase: any;
     checkAuth().then(unsub => {
       if (unsub) unsubscribeFirebase = unsub;
@@ -5964,7 +5697,7 @@ function MainApp() {
       window.removeEventListener('cipherchat_auth_changed', handleCustomAuthChange);
       if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
     };
-  }, [resetInactivityTimer]);
+  }, [checkAuth]);
 
   const handleLogout = async () => {
     localStorage.removeItem('cipherchat_session');
