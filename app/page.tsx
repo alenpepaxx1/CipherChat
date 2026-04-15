@@ -19,7 +19,7 @@ import {
   GoogleAuthProvider,
   User as FirebaseUser
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, serverTimestamp, collection, getDocs, query, where, writeBatch, updateDoc, deleteDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, serverTimestamp, collection, getDocs, query, where, writeBatch, updateDoc, deleteDoc, onSnapshot, addDoc, orderBy } from 'firebase/firestore';
 import { useIsMobile } from '@/hooks/use-mobile';
 import * as Crypto from '../lib/crypto';
 
@@ -122,10 +122,12 @@ type Story = {
 };
 
 type CallState = {
+  id?: string;
   chatId: string;
   type: 'audio' | 'video';
   status: 'calling' | 'connecting' | 'connected' | 'reconnecting' | 'connection_lost';
   participants: User[];
+  callerId?: string;
 };
 type ChatSettings = {
   readReceipts: boolean;
@@ -705,7 +707,7 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [currentUser, setCurrentUser] = useState<User>(user);
   const [activeTab, setActiveTab] = useState<'chat' | 'architecture' | 'profile' | 'settings'>('chat');
-  const [chats, setChats] = useState<Chat[]>(INITIAL_CHATS);
+  const [chats, setChats] = useState<Chat[]>([]);
   const [stories, setStories] = useState<Story[]>(INITIAL_STORIES);
   const [activeStoryUserId, setActiveStoryUserId] = useState<string | null>(null);
   const [showStoryUpload, setShowStoryUpload] = useState(false);
@@ -775,10 +777,129 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line
     setMounted(true);
     if (isMobile) setIsSidebarOpen(false);
   }, [isMobile]);
+
+  // Real-time Chat Listener
+  useEffect(() => {
+    if (!currentUser?.id) return;
+
+    const q = query(
+      collection(db, 'chats'), 
+      where('participantIds', 'array-contains', currentUser.id)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const updatedChats = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          ...data,
+          id: doc.id,
+          messages: data.messages || [] // Messages might be in subcollection or array
+        } as Chat;
+      });
+      
+      setChats(prev => {
+        // Merge to preserve messages loaded by the message listener
+        return updatedChats.map(newChat => {
+          const existingChat = prev.find(c => c.id === newChat.id);
+          return existingChat ? { ...newChat, messages: existingChat.messages } : newChat;
+        });
+      });
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'chats');
+    });
+
+    return () => unsubscribe();
+  }, [currentUser?.id]);
+
+  // Real-time Message Listener for Active Chat
+  useEffect(() => {
+    if (!activeChatId || !currentUser?.id) return;
+
+    const q = query(
+      collection(db, 'chats', activeChatId, 'messages'), 
+      orderBy('timestamp', 'asc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const messages = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          ...data,
+          id: doc.id,
+          timestamp: data.timestamp?.toDate() || new Date()
+        } as Message;
+      });
+      
+      setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, messages } : c));
+    }, (err) => {
+      // If messages subcollection doesn't exist yet, it's fine
+      if (err.message.includes('permission-denied')) {
+         console.warn("Permission denied for messages - might be a new chat");
+      } else {
+        handleFirestoreError(err, OperationType.LIST, `chats/${activeChatId}/messages`);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [activeChatId, currentUser?.id]);
+
+  // Real-time Call Listener
+  useEffect(() => {
+    if (!currentUser?.id) return;
+
+    const q = query(
+      collection(db, 'calls'), 
+      where('participantIds', 'array-contains', currentUser.id),
+      where('status', '==', 'calling')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          const callData = change.doc.data();
+          if (callData.callerId !== currentUser.id) {
+            setActiveCall({
+              id: change.doc.id,
+              chatId: callData.chatId,
+              type: callData.type,
+              status: 'calling',
+              participants: callData.participants,
+              callerId: callData.callerId
+            });
+          }
+        }
+      });
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'calls');
+    });
+
+    return () => unsubscribe();
+  }, [currentUser?.id]);
+
+  // Sync user profile to public collection for searchability
+  useEffect(() => {
+    if (!currentUser?.id) return;
+
+    const syncProfile = async () => {
+      try {
+        await setDoc(doc(db, 'users_public', currentUser.id), {
+          id: currentUser.id,
+          name: currentUser.name,
+          username: currentUser.username,
+          avatar: currentUser.avatar,
+          isOnline: true,
+          lastSeen: serverTimestamp()
+        }, { merge: true });
+      } catch (err) {
+        console.error("Profile sync failed:", err);
+      }
+    };
+
+    syncProfile();
+  }, [currentUser?.id, currentUser?.name, currentUser?.username, currentUser?.avatar]);
 
   if (!mounted) return null;
 
@@ -1612,6 +1733,28 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
     }
   }, [chat.id, chat.messages, setChats, currentUser.id]);
 
+  const initiateCall = async (type: 'audio' | 'video') => {
+    const participants = chat.participants.filter(p => p.id !== currentUser.id);
+    const participantIds = [currentUser.id, ...participants.map(p => p.id)];
+    
+    const callData = {
+      chatId: chat.id,
+      type,
+      status: 'calling',
+      participants: [currentUser, ...participants],
+      participantIds,
+      callerId: currentUser.id,
+      createdAt: serverTimestamp()
+    };
+
+    try {
+      const callRef = await addDoc(collection(db, 'calls'), callData);
+      setActiveCall({ ...callData, id: callRef.id } as any);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'calls');
+    }
+  };
+
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() && !attachmentPreview) return;
@@ -1665,6 +1808,28 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
     setChats(prev => prev.map(c => c.id === chat.id ? { ...c, messages: [...c.messages, newMessage] } : c));
     setInputText('');
     setAttachmentPreview(null);
+
+    // Persist to Firestore
+    try {
+      const messageData = {
+        ...newMessage,
+        timestamp: serverTimestamp(),
+      };
+      delete (messageData as any).id; // Let Firestore generate ID
+      
+      await addDoc(collection(db, 'chats', chat.id, 'messages'), messageData);
+      
+      // Update last message in chat doc for previews
+      await updateDoc(doc(db, 'chats', chat.id), {
+        lastMessage: {
+          text: newMessage.text,
+          senderId: currentUser.id,
+          timestamp: serverTimestamp()
+        }
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `chats/${chat.id}/messages`);
+    }
 
     // Simulate decryption delay
     setTimeout(() => {
@@ -1970,24 +2135,14 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
           {chat.id !== 'saved' && !chat.isGroup && (
             <>
               <button 
-                onClick={() => setActiveCall({ 
-                  chatId: chat.id, 
-                  type: 'audio', 
-                  status: 'calling', 
-                  participants: chat.participants.filter(p => p.id !== currentUser.id) 
-                })}
+                onClick={() => initiateCall('audio')}
                 className="p-1.5 sm:p-2.5 text-neutral-400 hover:bg-neutral-800/50 hover:text-blue-400 rounded-xl transition-all duration-300"
                 title="Start Audio Call"
               >
                 <Phone className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
               <button 
-                onClick={() => setActiveCall({ 
-                  chatId: chat.id, 
-                  type: 'video', 
-                  status: 'calling', 
-                  participants: chat.participants.filter(p => p.id !== currentUser.id) 
-                })}
+                onClick={() => initiateCall('video')}
                 className="p-1.5 sm:p-2.5 text-neutral-400 hover:bg-neutral-800/50 hover:text-blue-400 rounded-xl transition-all duration-300"
                 title="Start Video Call"
               >
@@ -3525,14 +3680,18 @@ function NewChatModal({ onClose, currentUser, onCreateChat }: { onClose: () => v
     }
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (selectedUsers.length === 0) return;
 
-    const newChatId = `c_${Date.now()}`;
+    // For 1:1 chats, use a deterministic ID based on participant UIDs to avoid duplicates
+    const isGroupChat = isGroup || selectedUsers.length > 1;
+    const participantIds = [currentUser.id, ...selectedUsers.map(u => u.id)].sort();
+    const newChatId = isGroupChat ? `g_${Date.now()}` : `dm_${participantIds.join('_')}`;
+    
     const newChat: Chat = {
       id: newChatId,
-      name: isGroup ? (groupName || 'New Group') : selectedUsers[0].name,
-      isGroup: isGroup || selectedUsers.length > 1,
+      name: isGroupChat ? (groupName || 'New Group') : selectedUsers[0].name,
+      isGroup: isGroupChat,
       participants: [currentUser, ...selectedUsers],
       messages: [],
       settings: {
@@ -3546,7 +3705,17 @@ function NewChatModal({ onClose, currentUser, onCreateChat }: { onClose: () => v
       }
     };
 
-    onCreateChat(newChat);
+    try {
+      await setDoc(doc(db, 'chats', newChatId), {
+        ...newChat,
+        participantIds,
+        createdAt: serverTimestamp(),
+        lastMessage: null
+      });
+      onCreateChat(newChat);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `chats/${newChatId}`);
+    }
   };
 
     return (
@@ -3776,7 +3945,8 @@ function CallOverlay({ activeCall, setActiveCall, currentUser }: { activeCall: C
     };
   }, []);
 
-  // Simulate connection delay and states
+  // Removed simulation effects to use real Firestore status
+  /*
   useEffect(() => {
     if (activeCall.status === 'calling') {
       const timer = setTimeout(() => {
@@ -3790,6 +3960,7 @@ function CallOverlay({ activeCall, setActiveCall, currentUser }: { activeCall: C
       return () => clearTimeout(timer);
     }
   }, [activeCall.status, setActiveCall]);
+  */
 
   // Simulate random network issues
   useEffect(() => {
@@ -3819,9 +3990,55 @@ function CallOverlay({ activeCall, setActiveCall, currentUser }: { activeCall: C
     }
   }, [activeCall.status, setActiveCall]);
 
+  const handleAcceptCall = async () => {
+    if (!activeCall.id) return;
+    try {
+      await updateDoc(doc(db, 'calls', activeCall.id), {
+        status: 'connecting'
+      });
+      setActiveCall(prev => prev ? { ...prev, status: 'connecting' } : null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `calls/${activeCall.id}`);
+    }
+  };
+
+  const handleDeclineCall = async () => {
+    if (!activeCall.id) return;
+    try {
+      await updateDoc(doc(db, 'calls', activeCall.id), {
+        status: 'declined'
+      });
+      setActiveCall(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `calls/${activeCall.id}`);
+    }
+  };
+
   const handleReconnect = () => {
     setActiveCall(prev => prev ? { ...prev, status: 'connecting' } : null);
   };
+
+  // Sync call status from Firestore
+  useEffect(() => {
+    if (!activeCall.id) return;
+
+    const unsubscribe = onSnapshot(doc(db, 'calls', activeCall.id), (snapshot) => {
+      if (!snapshot.exists()) {
+        setActiveCall(null);
+        return;
+      }
+      const data = snapshot.data();
+      if (data.status === 'ended' || data.status === 'declined') {
+        setActiveCall(null);
+      } else if (data.status !== activeCall.status) {
+        setActiveCall(prev => prev ? { ...prev, status: data.status } : null);
+      }
+    }, (err) => {
+      console.error("Call sync error:", err);
+    });
+
+    return () => unsubscribe();
+  }, [activeCall.id, activeCall.status, setActiveCall]);
 
   // Call duration timer
   useEffect(() => {
@@ -3862,8 +4079,19 @@ function CallOverlay({ activeCall, setActiveCall, currentUser }: { activeCall: C
     };
   }, [activeCall.status, activeCall.type, videoQuality]);
 
-  const handleEndCall = () => {
-    setActiveCall(null);
+  const handleEndCall = async () => {
+    if (!activeCall.id) {
+      setActiveCall(null);
+      return;
+    }
+    try {
+      await updateDoc(doc(db, 'calls', activeCall.id), {
+        status: 'ended'
+      });
+      setActiveCall(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `calls/${activeCall.id}`);
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -3919,13 +4147,30 @@ function CallOverlay({ activeCall, setActiveCall, currentUser }: { activeCall: C
           <div className="text-center px-4">
             <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold text-white mb-2">
               {activeCall.status === 'calling' 
-                ? `Calling ${activeCall.participants[0].name}...`
+                ? (activeCall.callerId === currentUser.id ? `Calling ${activeCall.participants[0].name}...` : `${activeCall.participants[0].name} is calling you...`)
                 : 'Securing connection...'}
             </h2>
             <p className="text-sm sm:text-base text-neutral-400 font-medium tracking-wide">
               Establishing end-to-end encryption
             </p>
           </div>
+
+          {activeCall.status === 'calling' && activeCall.callerId !== currentUser.id && (
+            <div className="flex items-center gap-6 mt-4">
+              <button 
+                onClick={handleDeclineCall}
+                className="w-16 h-16 rounded-full bg-rose-500 flex items-center justify-center text-white shadow-lg shadow-rose-500/20 hover:bg-rose-600 transition-all"
+              >
+                <PhoneOff className="w-8 h-8" />
+              </button>
+              <button 
+                onClick={handleAcceptCall}
+                className="w-20 h-20 rounded-full bg-emerald-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-600 transition-all animate-bounce"
+              >
+                {activeCall.type === 'video' ? <Video className="w-10 h-10" /> : <Phone className="w-10 h-10" />}
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="w-full h-full flex flex-col items-center justify-center p-4 lg:p-8 relative">
