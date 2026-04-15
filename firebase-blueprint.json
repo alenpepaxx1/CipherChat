@@ -1,0 +1,41 @@
+{
+  "entities": {
+    "users": {
+      "title": "User",
+      "description": "User private profile information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "avatar": { "type": "string", "format": "uri" },
+        "isOnline": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "email"]
+    },
+    "users_public": {
+      "title": "Public User",
+      "description": "User public profile information for search",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "username": { "type": "string" },
+        "avatar": { "type": "string", "format": "uri" },
+        "isOnline": { "type": "boolean" }
+      },
+      "required": ["id", "name", "username"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "users",
+      "description": "User private documents"
+    },
+    "/users_public/{userId}": {
+      "schema": "users_public",
+      "description": "User public documents for searchability"
+    }
+  }
+}
