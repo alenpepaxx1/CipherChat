@@ -1,0 +1,5 @@
+{
+  "name": "CipherChat Architecture",
+  "description": "Secure E2EE chat platform design, featuring ephemeral messaging, group chats, and a comprehensive security architecture plan.",
+  "requestFramePermissions": ["camera", "microphone"]
+}
