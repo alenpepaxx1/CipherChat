@@ -156,12 +156,13 @@ const ALICE: User = { id: 'u2', name: 'Alice', username: '@alice_crypto', email:
 const BOB: User = { id: 'u3', name: 'Bob', username: '@bob_secure', email: 'bob@cipherchat.app', avatar: 'https://picsum.photos/seed/bob/100/100', isOnline: false };
 const GEMINI: User = { id: 'ai', name: 'Gemini AI', username: '@gemini', email: 'ai@cipherchat.app', avatar: 'https://picsum.photos/seed/sparkles/100/100', isOnline: true };
 
-const INITIAL_CHATS: Chat[] = [
+// --- Mock Data Helpers ---
+const getInitialChats = (currentUser: User): Chat[] => [
   {
     id: 'ai-chat',
     name: 'AI Assistant',
     isGroup: false,
-    participants: [CURRENT_USER, GEMINI],
+    participants: [currentUser, GEMINI],
     settings: { 
       readReceipts: true, 
       defaultTtl: 0, 
@@ -179,7 +180,7 @@ const INITIAL_CHATS: Chat[] = [
     id: 'saved',
     name: 'Saved Messages',
     isGroup: false,
-    participants: [CURRENT_USER],
+    participants: [currentUser],
     settings: { 
       readReceipts: false, 
       defaultTtl: 0, 
@@ -190,44 +191,7 @@ const INITIAL_CHATS: Chat[] = [
       linkPreviews: true
     },
     messages: [
-      { id: 'sm1', senderId: 'u1', text: 'Welcome to your personal space! You can save messages, files, and notes here.', timestamp: new Date(), isEphemeral: false },
-    ],
-  },
-  {
-    id: 'c1',
-    name: 'Alice',
-    isGroup: false,
-    participants: [CURRENT_USER, ALICE],
-    settings: { 
-      readReceipts: true, 
-      defaultTtl: 10, 
-      notifications: true,
-      encryptionProtocol: 'quantum-resistant',
-      autoDownload: 'wifi-only',
-      typingIndicators: true,
-      linkPreviews: true
-    },
-    messages: [
-      { id: 'm1', senderId: 'u2', text: 'Hey! Is this channel secure?', timestamp: new Date(Date.now() - 100000), isEphemeral: false, viewedAt: new Date(Date.now() - 90000), reactions: [{ emoji: '👍', userIds: ['u1'] }] },
-      { id: 'm2', senderId: 'u1', text: 'Yes, end-to-end encrypted using the Signal Protocol.', timestamp: new Date(Date.now() - 80000), isEphemeral: false, viewedAt: new Date(Date.now() - 70000) },
-    ],
-  },
-  {
-    id: 'c2',
-    name: 'Project Red (Secret)',
-    isGroup: true,
-    participants: [CURRENT_USER, ALICE, BOB],
-    settings: { 
-      readReceipts: false, 
-      defaultTtl: 30, 
-      notifications: false,
-      encryptionProtocol: 'standard',
-      autoDownload: 'never',
-      typingIndicators: false,
-      linkPreviews: false
-    },
-    messages: [
-      { id: 'm3', senderId: 'u3', text: 'I will send the access codes shortly.', timestamp: new Date(Date.now() - 50000), isEphemeral: true, ttlSeconds: 30 },
+      { id: 'sm1', senderId: currentUser.id, text: 'Welcome to your personal space! You can save messages, files, and notes here.', timestamp: new Date(), isEphemeral: false },
     ],
   }
 ];
@@ -707,11 +671,11 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [currentUser, setCurrentUser] = useState<User>(user);
   const [activeTab, setActiveTab] = useState<'chat' | 'architecture' | 'profile' | 'settings'>('chat');
-  const [chats, setChats] = useState<Chat[]>([]);
+  const [chats, setChats] = useState<Chat[]>(() => getInitialChats(user));
   const [stories, setStories] = useState<Story[]>(INITIAL_STORIES);
   const [activeStoryUserId, setActiveStoryUserId] = useState<string | null>(null);
   const [showStoryUpload, setShowStoryUpload] = useState(false);
-  const [activeChatId, setActiveChatId] = useState<string>(INITIAL_CHATS[0].id);
+  const [activeChatId, setActiveChatId] = useState<string>('ai-chat');
   const [activeCall, setActiveCall] = useState<CallState | null>(null);
   const [isNetworkOnline, setIsNetworkOnline] = useState(true);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
@@ -796,16 +760,26 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
         return {
           ...data,
           id: doc.id,
-          messages: data.messages || [] // Messages might be in subcollection or array
+          messages: data.messages || [] 
         } as Chat;
       });
       
       setChats(prev => {
-        // Merge to preserve messages loaded by the message listener
-        return updatedChats.map(newChat => {
-          const existingChat = prev.find(c => c.id === newChat.id);
-          return existingChat ? { ...newChat, messages: existingChat.messages } : newChat;
+        // Keep initial chats that are not in Firestore yet
+        const initialChats = getInitialChats(currentUser);
+        const merged = [...initialChats];
+        
+        updatedChats.forEach(newChat => {
+          const index = merged.findIndex(c => c.id === newChat.id);
+          if (index !== -1) {
+            // Merge Firestore data with existing state (preserving messages)
+            merged[index] = { ...merged[index], ...newChat, messages: merged[index].messages };
+          } else {
+            merged.push(newChat);
+          }
         });
+        
+        return merged;
       });
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, 'chats');
@@ -817,6 +791,9 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
   // Real-time Message Listener for Active Chat
   useEffect(() => {
     if (!activeChatId || !currentUser?.id) return;
+
+    // Skip Firestore listener for local-only chats to avoid permission errors
+    if (activeChatId === 'ai-chat' || activeChatId === 'saved') return;
 
     const q = query(
       collection(db, 'chats', activeChatId, 'messages'), 
@@ -1809,26 +1786,28 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
     setInputText('');
     setAttachmentPreview(null);
 
-    // Persist to Firestore
-    try {
-      const messageData = {
-        ...newMessage,
-        timestamp: serverTimestamp(),
-      };
-      delete (messageData as any).id; // Let Firestore generate ID
-      
-      await addDoc(collection(db, 'chats', chat.id, 'messages'), messageData);
-      
-      // Update last message in chat doc for previews
-      await updateDoc(doc(db, 'chats', chat.id), {
-        lastMessage: {
-          text: newMessage.text,
-          senderId: currentUser.id,
-          timestamp: serverTimestamp()
-        }
-      });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `chats/${chat.id}/messages`);
+    // Persist to Firestore (skip for local-only chats)
+    if (chat.id !== 'ai-chat' && chat.id !== 'saved') {
+      try {
+        const messageData = {
+          ...newMessage,
+          timestamp: serverTimestamp(),
+        };
+        delete (messageData as any).id; // Let Firestore generate ID
+        
+        await addDoc(collection(db, 'chats', chat.id, 'messages'), messageData);
+        
+        // Update last message in chat doc for previews
+        await updateDoc(doc(db, 'chats', chat.id), {
+          lastMessage: {
+            text: newMessage.text,
+            senderId: currentUser.id,
+            timestamp: serverTimestamp()
+          }
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, `chats/${chat.id}/messages`);
+      }
     }
 
     // Simulate decryption delay
