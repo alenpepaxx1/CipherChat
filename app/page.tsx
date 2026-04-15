@@ -717,7 +717,7 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
 
   useEffect(() => {
     if (!Crypto.isCryptoAvailable()) {
-      setCryptoError('Web Crypto API is not available. This application requires a Secure Context (HTTPS or localhost) to function correctly.');
+      setCryptoError('End-to-End Encryption (E2EE) is currently disabled because you are accessing the app over a non-secure connection (HTTP). For full security and encryption, please use HTTPS or localhost.');
     }
   }, []);
 
@@ -782,42 +782,8 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
 
   if (!mounted) return null;
 
-  if (cryptoError) {
-    return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-neutral-950 p-6">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="max-w-md w-full bg-neutral-900 border border-red-500/30 rounded-3xl p-8 text-center"
-        >
-          <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
-            <MonitorOff className="w-10 h-10 text-red-500" />
-          </div>
-          <h2 className="text-2xl font-bold text-white mb-4">Secure Context Required</h2>
-          <p className="text-neutral-400 mb-8 leading-relaxed">
-            {cryptoError}
-          </p>
-          <div className="space-y-4">
-            <div className="p-4 bg-neutral-800/50 rounded-2xl text-left text-sm text-neutral-300 border border-neutral-700">
-              <p className="font-bold mb-1 text-neutral-200">How to fix this:</p>
-              <ul className="list-disc list-inside space-y-1 opacity-80">
-                <li>Use <strong>HTTPS</strong> instead of HTTP</li>
-                <li>Access via <strong>localhost</strong></li>
-                <li>Check your browser security settings</li>
-              </ul>
-            </div>
-            <button 
-              onClick={() => window.location.reload()}
-              className="w-full py-4 rounded-2xl bg-neutral-800 text-white font-bold hover:bg-neutral-700 transition-all flex items-center justify-center gap-2"
-            >
-              <RefreshCw className="w-5 h-5" />
-              Try Again
-            </button>
-          </div>
-        </motion.div>
-      </div>
-    );
-  }
+  // Removed blocking cryptoError screen to allow HTTP access as requested by user
+  // if (cryptoError) { ... }
 
   const activeChat = chats.find(c => c.id === activeChatId);
 
@@ -825,6 +791,26 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
 
   return (
     <div className={`flex h-[100dvh] bg-neutral-950 text-neutral-100 font-sans overflow-hidden selection:bg-blue-500/30 relative ${screenSecurity ? 'select-none' : ''}`}>
+      {/* Non-blocking Crypto Warning Banner */}
+      <AnimatePresence>
+        {cryptoError && (
+          <motion.div 
+            initial={{ y: -100 }}
+            animate={{ y: 0 }}
+            exit={{ y: -100 }}
+            className="fixed top-0 left-0 right-0 z-[100] bg-amber-500/90 backdrop-blur-md text-amber-950 px-4 py-2 text-center text-xs font-bold flex items-center justify-center gap-2 shadow-lg"
+          >
+            <AlertCircle className="w-4 h-4" />
+            <span>{cryptoError}</span>
+            <button 
+              onClick={() => setCryptoError(null)}
+              className="ml-2 p-1 hover:bg-amber-600/20 rounded-full transition-colors"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* Dynamic Watermark (Deterrent) */}
       {screenSecurity && (
         <div className="fixed inset-0 pointer-events-none z-[999] opacity-[0.03] flex flex-wrap content-around justify-around overflow-hidden select-none">
