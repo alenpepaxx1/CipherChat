@@ -2,6 +2,10 @@
 
 CipherChat is a highly secure, privacy-first real-time messaging application designed to keep your communications safe from prying eyes. It features end-to-end encryption, advanced local security measures, and ephemeral messaging.
 
+<div align="center">
+<img width="1920" height="2577" alt="Cyber" src="https://i.ibb.co/DfzfyryH/screencapture-localhost-3000-2026-04-15-06-55-15.png" />
+</div>
+
 ## 🚀 Core Features
 
 ### 🔐 Security & Privacy
