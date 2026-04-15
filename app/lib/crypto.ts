@@ -37,7 +37,34 @@ export async function getPrivateKey(): Promise<string | null> {
   });
 }
 
+export function isCryptoAvailable() {
+  return typeof window !== 'undefined' && !!window.crypto && !!window.crypto.subtle;
+}
+
+export async function exportPublicKey(key: CryptoKey): Promise<string> {
+  const exported = await window.crypto.subtle.exportKey('spki', key);
+  return btoa(String.fromCharCode(...new Uint8Array(exported)));
+}
+
+export async function importPublicKey(pem: string): Promise<CryptoKey> {
+  const binaryDerString = atob(pem);
+  const binaryDer = new Uint8Array(binaryDerString.length);
+  for (let i = 0; i < binaryDerString.length; i++) {
+    binaryDer[i] = binaryDerString.charCodeAt(i);
+  }
+  return await window.crypto.subtle.importKey(
+    'spki',
+    binaryDer,
+    { name: 'ECDH', namedCurve: 'P-256' },
+    true,
+    []
+  );
+}
+
 export async function generateKeyPair() {
+  if (!isCryptoAvailable()) {
+    throw new Error('Web Crypto API is not available. Please ensure you are using a secure context (HTTPS or localhost).');
+  }
   return await window.crypto.subtle.generateKey(
     { name: 'ECDH', namedCurve: 'P-256' },
     true,
