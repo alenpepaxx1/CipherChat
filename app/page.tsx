@@ -687,24 +687,9 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
     }
   }, []);
 
-  const [antiCensorship, setAntiCensorship] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('cipher-anti-censorship') === 'true';
-    }
-    return false;
-  });
-  const [connectionProtocol, setConnectionProtocol] = useState<'direct' | 'proxy' | 'wireguard' | 'openvpn'>(() => {
-    if (typeof window !== 'undefined') {
-      return (localStorage.getItem('cipher-protocol') as any) || 'direct';
-    }
-    return 'direct';
-  });
-  const [screenSecurity, setScreenSecurity] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('cipher-screen-security') === 'true';
-    }
-    return false;
-  });
+  const [antiCensorship, setAntiCensorship] = useState(false);
+  const [connectionProtocol, setConnectionProtocol] = useState<'direct' | 'proxy' | 'wireguard' | 'openvpn'>('direct');
+  const [screenSecurity, setScreenSecurity] = useState(false);
 
   useEffect(() => {
     async function initCrypto() {
@@ -743,6 +728,15 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
   useEffect(() => {
     setMounted(true);
     if (isMobile) setIsSidebarOpen(false);
+
+    // Initialize settings from localStorage
+    const savedAntiCensorship = localStorage.getItem('cipher-anti-censorship') === 'true';
+    const savedProtocol = (localStorage.getItem('cipher-protocol') as any) || 'direct';
+    const savedScreenSecurity = localStorage.getItem('cipher-screen-security') === 'true';
+
+    setAntiCensorship(savedAntiCensorship);
+    setConnectionProtocol(savedProtocol);
+    setScreenSecurity(savedScreenSecurity);
   }, [isMobile]);
 
   // Real-time Chat Listener
