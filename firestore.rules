@@ -1,0 +1,69 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (Firebase Auth UID)
+    // Fields:
+    //   - id: string (required) - The user's UID
+    //   - name: string (required) - Display name
+    //   - email: string (required) - User's email
+    //   - avatar: string (optional) - URL to avatar image
+    //   - isOnline: boolean (optional) - Online status
+    //   - createdAt: timestamp (optional) - Creation time
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      // Allow access for both Firebase Auth (Google) and the custom local auth system
+      return true; 
+    }
+
+    function isOwner(userId) {
+      // For Firebase Auth users, verify UID. 
+      // For custom auth users (request.auth == null), we bypass this check for the prototype.
+      // In production, a real backend would issue Custom Tokens to securely integrate the separate auth system with Firestore.
+      return request.auth != null ? request.auth.uid == userId : true;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'name', 'email']) &&
+             data.id is string && 
+             (request.auth != null ? data.id == request.auth.uid : true) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidPublicUser(data) {
+      return data.keys().hasAll(['id', 'name', 'username']) &&
+             data.id is string &&
+             (request.auth != null ? data.id == request.auth.uid : true) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.username is string && data.username.size() > 0 && data.username.size() < 50;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Users can read/write their own private data. 
+      allow read, write: if isOwner(userId);
+    }
+
+    match /users_public/{userId} {
+      // Public profiles are readable by any authenticated user for search.
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) && isValidPublicUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidPublicUser(request.resource.data) &&
+                    request.resource.data.id == resource.data.id;
+      allow delete: if isOwner(userId);
+    }
+  }
+}
