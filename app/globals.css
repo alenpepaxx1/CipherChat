@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  html, body {
+    @apply bg-neutral-950 text-neutral-100;
+  }
+
+  /* Light Theme Override */
+  .theme-light {
+    filter: invert(1) hue-rotate(180deg);
+    background-color: #ffffff;
+  }
+
+  .theme-light img,
+  .theme-light video,
+  .theme-light [data-no-invert="true"] {
+    filter: invert(1) hue-rotate(180deg);
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-neutral-950;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-neutral-700 rounded-full border-[3px] border-solid border-neutral-950;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-neutral-600;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #404040 #0a0a0a;
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply bg-neutral-900/50 backdrop-blur-xl border border-neutral-800/60;
+  }
+  
+  .glass-dark {
+    @apply bg-black/40 backdrop-blur-2xl border border-white/5;
+  }
+
+  .text-gradient {
+    @apply bg-gradient-to-br from-white via-white to-neutral-500 bg-clip-text text-transparent;
+  }
+}
