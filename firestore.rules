@@ -65,5 +65,24 @@ service cloud.firestore {
                     request.resource.data.id == resource.data.id;
       allow delete: if isOwner(userId);
     }
+
+    match /chats/{chatId} {
+      // Chats are readable/writable by participants
+      allow read, write: if isAuthenticated() && 
+                          (request.auth.uid in resource.data.participantIds || 
+                           request.auth.uid in request.resource.data.participantIds);
+      
+      match /messages/{messageId} {
+        allow read, write: if isAuthenticated() && 
+                            request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+      }
+    }
+
+    match /calls/{callId} {
+      // Calls are readable/writable by participants
+      allow read, write: if isAuthenticated() && 
+                          (request.auth.uid in resource.data.participantIds || 
+                           request.auth.uid in request.resource.data.participantIds);
+    }
   }
 }
