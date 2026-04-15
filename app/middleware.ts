@@ -7,7 +7,7 @@ const LIMIT = 100; // requests
 const WINDOW = 60 * 1000; // 1 minute
 
 export function middleware(request: NextRequest) {
-  const ip = request.ip || 'anonymous';
+  const ip = (request as any).ip || request.headers.get('x-forwarded-for') || 'anonymous';
   const now = Date.now();
   const entry = rateLimitMap.get(ip) || { count: 0, lastReset: now };
 
