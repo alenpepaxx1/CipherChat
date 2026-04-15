@@ -4,6 +4,10 @@
  * Implements ECDH for key exchange and AES-GCM for message encryption.
  */
 
+export function isCryptoAvailable() {
+  return typeof window !== 'undefined' && !!window.crypto && !!window.crypto.subtle;
+}
+
 export async function generateKeyPair(): Promise<CryptoKeyPair> {
   return await window.crypto.subtle.generateKey(
     {
