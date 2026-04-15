@@ -510,9 +510,8 @@ function StoryViewer({ userId, stories, onClose, currentUser, setStories }: { us
                 }}
                 transition={{ 
                   duration: i === currentIndex ? 5 : 0, 
-                  ease: 'linear',
-                  paused: isPaused
-                }}
+                  ease: 'linear'
+                } as any}
                 className="h-full bg-white"
               />
             </div>
@@ -702,6 +701,7 @@ function StoryUploadModal({ onClose, onUpload, currentUser }: { onClose: () => v
 
 function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () => void, onLock: () => void }) {
   const [mounted, setMounted] = useState(false);
+  const [cryptoError, setCryptoError] = useState<string | null>(null);
   const isMobile = useIsMobile();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [currentUser, setCurrentUser] = useState<User>(user);
@@ -715,6 +715,13 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
   const [isNetworkOnline, setIsNetworkOnline] = useState(true);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const [userPrivateKey, setUserPrivateKey] = useState<CryptoKey | null>(null);
+
+  useEffect(() => {
+    if (!Crypto.isCryptoAvailable()) {
+      setCryptoError('Web Crypto API is not available. This application requires a Secure Context (HTTPS or localhost) to function correctly.');
+    }
+  }, []);
+
   const [antiCensorship, setAntiCensorship] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('cipher-anti-censorship') === 'true';
@@ -774,6 +781,43 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
   }, [isMobile]);
 
   if (!mounted) return null;
+
+  if (cryptoError) {
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-neutral-950 p-6">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-md w-full bg-neutral-900 border border-red-500/30 rounded-3xl p-8 text-center"
+        >
+          <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+            <MonitorOff className="w-10 h-10 text-red-500" />
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-4">Secure Context Required</h2>
+          <p className="text-neutral-400 mb-8 leading-relaxed">
+            {cryptoError}
+          </p>
+          <div className="space-y-4">
+            <div className="p-4 bg-neutral-800/50 rounded-2xl text-left text-sm text-neutral-300 border border-neutral-700">
+              <p className="font-bold mb-1 text-neutral-200">How to fix this:</p>
+              <ul className="list-disc list-inside space-y-1 opacity-80">
+                <li>Use <strong>HTTPS</strong> instead of HTTP</li>
+                <li>Access via <strong>localhost</strong></li>
+                <li>Check your browser security settings</li>
+              </ul>
+            </div>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full py-4 rounded-2xl bg-neutral-800 text-white font-bold hover:bg-neutral-700 transition-all flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="w-5 h-5" />
+              Try Again
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   const activeChat = chats.find(c => c.id === activeChatId);
 
@@ -936,7 +980,7 @@ function CipherChatApp({ user, onLogout, onLock }: { user: User, onLogout: () =>
                     onClick={(e) => {
                       e.stopPropagation();
                       setChats(prev => prev.filter(c => c.id !== chat.id));
-                      if (activeChatId === chat.id) setActiveChatId(null);
+                      if (activeChatId === chat.id) setActiveChatId('');
                     }}
                     className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-neutral-500 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"
                     title="Delete chat"
@@ -1149,7 +1193,8 @@ function DecryptedText({
 
         const senderPubKey = await Crypto.importPublicKey(sender.publicKey);
         const secretKey = await Crypto.deriveSecretKey(userPrivateKey, senderPubKey);
-        const text = await Crypto.decryptMessage(msg.encryptedData.ciphertext, msg.encryptedData.iv, secretKey);
+        const encryptedData = msg.encryptedData as { ciphertext: ArrayBuffer; iv: Uint8Array };
+        const text = await Crypto.decryptMessage(encryptedData.ciphertext, encryptedData.iv, secretKey);
         setDecryptedText(text);
       } catch (err) {
         console.error("Decryption failed:", err);
@@ -2135,11 +2180,11 @@ function ChatView({ chat, setChats, currentUser, setActiveCall, isNetworkOnline,
                     {msg.isEncryptedState && (
                       <div className={`absolute -top-2 ${isMe ? '-left-4 sm:-left-6' : '-right-4 sm:-right-6'} p-1 rounded-full bg-neutral-900 border border-neutral-700`}>
                         {typeof msg.encryptedData === 'string' ? (
-                          <ShieldCheck className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-indigo-400" title="PGP Encrypted" />
+                          <span title="PGP Encrypted"><ShieldCheck className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-indigo-400" /></span>
                         ) : msg.encryptedData ? (
-                          <Lock className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-emerald-400" title="AES-GCM Encrypted" />
+                          <span title="AES-GCM Encrypted"><Lock className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-emerald-400" /></span>
                         ) : (
-                          <AlertCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-rose-400" title="Encryption Warning: Missing Data" />
+                          <span title="Encryption Warning: Missing Data"><AlertCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-rose-400" /></span>
                         )}
                       </div>
                     )}
@@ -3505,7 +3550,11 @@ function NewChatModal({ onClose, currentUser, onCreateChat }: { onClose: () => v
       settings: {
         readReceipts: true,
         defaultTtl: 10,
-        notifications: true
+        notifications: true,
+        encryptionProtocol: 'aes-gcm',
+        autoDownload: 'always',
+        typingIndicators: true,
+        linkPreviews: true
       }
     };
 
